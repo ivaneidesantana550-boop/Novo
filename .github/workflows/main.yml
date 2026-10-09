@@ -41,7 +41,6 @@ jobs:
 
           if [ ! -d "$SDK_ROOT" ]; then
             echo "Erro: Android SDK não encontrado."
-            echo "Caminho verificado: $SDK_ROOT"
             exit 1
           fi
 
@@ -108,14 +107,12 @@ jobs:
           )"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "Erro: nenhum arquivo ZIP foi encontrado na raiz do repositório."
-            echo
-            echo "Arquivos encontrados:"
+            echo "Erro: nenhum arquivo ZIP foi encontrado na raiz."
             find . -maxdepth 3 -type f | sort
             exit 1
           fi
 
-          echo "Arquivo ZIP encontrado: $ZIP_FILE"
+          echo "ZIP encontrado: $ZIP_FILE"
 
           rm -rf extracted-project
           mkdir -p extracted-project
@@ -133,15 +130,36 @@ jobs:
           )"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Erro: settings.gradle.kts não foi encontrado depois da extração."
-            echo
-            echo "Arquivos extraídos:"
+            echo "Erro: settings.gradle.kts não foi encontrado após extrair o ZIP."
             find extracted-project -maxdepth 6 -type f | sort
             exit 1
           fi
 
           echo "Projeto Android encontrado em: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Remover permissão protegida do Android
+        shell: bash
+        run: |
+          set -e
+
+          MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+
+          if [ ! -f "$MANIFEST" ]; then
+            echo "Erro: AndroidManifest.xml não encontrado."
+            exit 1
+          fi
+
+          sed -i \
+            '/android.permission.BATTERY_STATS/d' \
+            "$MANIFEST"
+
+          if grep -q "android.permission.BATTERY_STATS" "$MANIFEST"; then
+            echo "Erro: a permissão BATTERY_STATS ainda está no Manifest."
+            exit 1
+          fi
+
+          echo "Permissão protegida removida com sucesso."
 
       - name: Verificar estrutura do projeto
         shell: bash
@@ -213,7 +231,6 @@ jobs:
             output/RHZIN-Otimizador-debug.apk \
             | tee output/RHZIN-Otimizador-debug.apk.sha256
 
-          echo
           echo "APK gerado com sucesso:"
           ls -lh output/RHZIN-Otimizador-debug.apk
 
