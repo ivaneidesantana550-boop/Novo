@@ -16,7 +16,6 @@ env:
   GRADLE_VERSION: "8.9"
   ANDROID_API_LEVEL: "35"
   ANDROID_BUILD_TOOLS: "35.0.0"
-  APK_RELATIVE_PATH: "app/build/outputs/apk/debug/app-debug.apk"
 
 jobs:
   build-apk:
@@ -31,9 +30,9 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
+          java-version: "17"
 
-      - name: Localizar e configurar Android SDK
+      - name: Configurar Android SDK
         shell: bash
         run: |
           set -e
@@ -41,21 +40,22 @@ jobs:
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
 
           if [ ! -d "$SDK_ROOT" ]; then
-            echo "Erro: Android SDK não encontrado em:"
-            echo "$SDK_ROOT"
+            echo "Erro: Android SDK não encontrado."
+            echo "Caminho verificado: $SDK_ROOT"
             exit 1
           fi
 
-          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" \
-            -type f \
-            -name sdkmanager \
-            2>/dev/null \
-            | sort -V \
-            | tail -n 1)"
+          SDKMANAGER="$(
+            find "$SDK_ROOT/cmdline-tools" \
+              -type f \
+              -name sdkmanager \
+              2>/dev/null \
+              | sort -V \
+              | tail -n 1
+          )"
 
           if [ -z "$SDKMANAGER" ]; then
             echo "Erro: sdkmanager não encontrado."
-            find "$SDK_ROOT" -maxdepth 5 -type f -name sdkmanager 2>/dev/null || true
             exit 1
           fi
 
@@ -65,16 +65,17 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
-          SDKMANAGER_ARGS="--sdk_root=$SDK_ROOT"
+          yes | "$SDKMANAGER" \
+            --sdk_root="$SDK_ROOT" \
+            --licenses || true
 
-          yes | "$SDKMANAGER" $SDKMANAGER_ARGS --licenses || true
-
-          "$SDKMANAGER" $SDKMANAGER_ARGS \
+          "$SDKMANAGER" \
+            --sdk_root="$SDK_ROOT" \
             "platform-tools" \
-            "platforms;android-${ANDROID_API_LEVEL}" \
-            "build-tools;${ANDROID_BUILD_TOOLS}"
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      - name: Verificar Android SDK instalado
+      - name: Verificar Android SDK
         shell: bash
         run: |
           set -e
@@ -82,25 +83,47 @@ jobs:
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
 
           test -d "$SDK_ROOT/platform-tools"
-          test -d "$SDK_ROOT/platforms/android-${ANDROID_API_LEVEL}"
-          test -d "$SDK_ROOT/build-tools/${ANDROID_BUILD_TOOLS}"
+          test -d "$SDK_ROOT/platforms/android-35"
+          test -d "$SDK_ROOT/build-tools/35.0.0"
 
           echo "Android SDK configurado com sucesso."
-          echo "Platform: android-${ANDROID_API_LEVEL}"
-          echo "Build Tools: ${ANDROID_BUILD_TOOLS}"
 
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
+          gradle-version: "8.9"
 
-      - name: Localizar diretório do projeto Android
+      - name: Extrair ZIP e localizar projeto Android
         shell: bash
         run: |
           set -e
 
-          PROJECT_DIR="$(
+          ZIP_FILE="$(
             find . \
+              -maxdepth 1 \
+              -type f \
+              -iname "*.zip" \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Erro: nenhum arquivo ZIP foi encontrado na raiz do repositório."
+            echo
+            echo "Arquivos encontrados:"
+            find . -maxdepth 3 -type f | sort
+            exit 1
+          fi
+
+          echo "Arquivo ZIP encontrado: $ZIP_FILE"
+
+          rm -rf extracted-project
+          mkdir -p extracted-project
+
+          unzip -o "$ZIP_FILE" -d extracted-project
+
+          PROJECT_DIR="$(
+            find extracted-project \
               -type f \
               -name "settings.gradle.kts" \
               -not -path "*/build/*" \
@@ -110,13 +133,10 @@ jobs:
           )"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Erro: settings.gradle.kts não foi encontrado."
+            echo "Erro: settings.gradle.kts não foi encontrado depois da extração."
             echo
-            echo "Arquivos encontrados no repositório:"
-            find . -maxdepth 4 -type f | sort | head -200
-            echo
-            echo "Envie os arquivos extraídos do projeto."
-            echo "Não envie somente o arquivo ZIP."
+            echo "Arquivos extraídos:"
+            find extracted-project -maxdepth 6 -type f | sort
             exit 1
           fi
 
@@ -166,15 +186,15 @@ jobs:
             --stacktrace \
             :app:assembleDebug
 
-      - name: Validar APK gerado
+      - name: Validar e preparar APK
         shell: bash
         run: |
           set -e
 
-          APK_FILE="$PROJECT_DIR/$APK_RELATIVE_PATH"
+          APK_FILE="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK_FILE" ]; then
-            echo "Erro: o APK não foi encontrado em:"
+            echo "Erro: APK não foi encontrado em:"
             echo "$APK_FILE"
             exit 1
           fi
